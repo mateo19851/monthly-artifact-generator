@@ -1,0 +1,181 @@
+import * as React from 'react';
+import { useState, createRef } from 'react'
+const { ipcRenderer } = window.require("electron");
+import Button from 'react-bootstrap/Button';
+import ListGroup from 'react-bootstrap/ListGroup';
+import CloseButton from 'react-bootstrap/CloseButton';
+import Dropdown from 'react-bootstrap/Dropdown'
+import InputGroup from 'react-bootstrap/InputGroup';
+import { Spinner, FormControl, Popover, OverlayTrigger } from 'react-bootstrap';
+import { ArtifactElement } from '../../models/ArtifactElement';
+
+
+let repoType: string[] = [
+   "Git",
+   "Mercurial"
+];
+
+export const SearchFolders: React.FC<{}> = () => {
+   const folderStateStorageName: string = "foldersState";
+   let readFromStorage = localStorage.getItem(folderStateStorageName);
+   let parsedFromStorage = readFromStorage ? JSON.parse(readFromStorage) : new Array<ArtifactElement>();
+   let [folders, setFolders] = useState<ArtifactElement[]>(parsedFromStorage);
+   let monthCalendarRef = createRef<HTMLInputElement>();
+   let [outputDir, setOutputDir] = useState('');
+   let [isGenerating, setGenerating] = useState(false);
+   
+   React.useEffect(() => {
+      setOutputDir(localStorage.getItem("outputDirectory") as string);
+
+      let logGeneratedHandler = ipcRenderer.on('log-generated', (e,f, err) =>{
+
+
+         let foundFolder = folders.find(x => x.path === f);
+         if (foundFolder) {
+            foundFolder.generated = true;
+            foundFolder.generationError = err;
+         }
+
+         localStorage.setItem(folderStateStorageName, JSON.stringify([...folders]));
+         setFolders([...folders]);
+
+         if(folders.every(x => x.generated)) {
+            setGenerating(false);
+         }
+      });
+
+      return () => {
+         logGeneratedHandler.removeAllListeners('log-generated');
+      }
+   
+   }, []);
+
+
+
+   let [selectedItem, setSelectedItem] = useState<string>("")
+
+   const handleSelectFolder = () => {
+      let i = ipcRenderer.sendSync("testchannel", "my message");
+      let newFolders = i.map((element: string) => {
+         return {
+            path: element,
+            repositoryType: 'Git'
+         }
+      });
+
+      localStorage.setItem(folderStateStorageName, JSON.stringify([...folders, ...newFolders]));
+      setFolders([...folders, ...newFolders]);
+   };
+
+   const onElementClick: any = (e: any, i: string) => {
+      setSelectedItem(i);
+   };
+
+   const handleSelectRemove = (e: any, i: string) => {
+      let foldersTmp = folders.filter(x => x.path !== i);
+      setFolders([...foldersTmp]);
+      localStorage.setItem(folderStateStorageName, JSON.stringify([...foldersTmp]));
+   };
+
+   const onRepositoryTypeChanged = (event: any, path: string, repoType: string) => {
+      let foundObjects = folders.find(x => x.path === path);
+      if (foundObjects) {
+         foundObjects.repositoryType = repoType;
+      } 
+      
+      setFolders([...folders]);
+      localStorage.setItem(folderStateStorageName, JSON.stringify([...folders]));
+   };
+
+   const onGenerate = (event: any) => {
+      if (!monthCalendarRef || !monthCalendarRef.current || !monthCalendarRef?.current?.valueAsDate) {
+         return;
+      }
+      
+      let newfolders = folders.map(x => {
+         x.generated = false;
+         return x;
+      });
+      setFolders([...newfolders]);
+      setGenerating(true);
+      folders.forEach(i => {
+         ipcRenderer.send('invoke-repository', monthCalendarRef?.current?.valueAsDate, i, outputDir);
+      })
+   };
+
+   const onOutputDirectorySelected: any  = (event: any) => {
+      let localOutputDir = ipcRenderer.sendSync('selected-out-dir');
+      setOutputDir(localOutputDir);
+      localStorage.setItem('outputDirectory', localOutputDir);
+   } 
+
+   const popover =(err: any) => {
+      console.log('===================== err', err);
+      return <Popover id="popover-basic">
+        <Popover.Header as="h3">Error:</Popover.Header>
+        <Popover.Body>
+          {err.toString()}
+        </Popover.Body>
+      </Popover>
+   };
+
+   const buttonWithError = (err: any) => {
+      return <OverlayTrigger trigger="click" placement="right" overlay={popover(err)}>
+         <Button variant="success">❗</Button>
+      </OverlayTrigger>
+   };
+
+   
+   return <div>
+      
+      {
+         isGenerating && <Spinner animation="border" role="status">
+            <span className="visually-hidden">Loading...</span>
+         </Spinner>
+      }
+
+      <Button disabled={isGenerating} onClick={handleSelectFolder}>Select folder</Button>
+      <Button disabled={isGenerating} onClick={onGenerate}>Generate</Button>
+      <input type="month" ref={monthCalendarRef}/>
+
+      <InputGroup className="mb-3">
+         <Button disabled={isGenerating} onClick={onOutputDirectorySelected} variant="outline-secondary" id="button-addon1">
+            Output directory
+         </Button>
+         <FormControl placeholder="Output directory" value={outputDir} />
+      </InputGroup>
+      <div>
+         <ListGroup>
+            {folders.map((i) => {
+               return <div>
+                  <ListGroup.Item variant={i.generated ? ( i.generationError ? "danger" : "success" ) : "light" } key={i.path} onClick={(e:React.MouseEvent<HTMLInputElement>) => {onElementClick(e, i.path)}} 
+                     active={selectedItem === i.path}>
+                     <div>
+                        <CloseButton onClick={(e: React.MouseEvent<HTMLElement>) => handleSelectRemove(e, i.path)}  />
+                        {i.path}
+                        <Dropdown>
+                           <Dropdown.Toggle variant="success" id="dropdown-basic">
+                              {i.repositoryType}
+                           </Dropdown.Toggle>
+
+                           <Dropdown.Menu>
+                              {
+                                 repoType.map(s => {
+                                    return <Dropdown.Item 
+                                    onClick={(e:  React.MouseEvent<HTMLElement>) => onRepositoryTypeChanged(e, i.path, s)}>
+                                       {s}
+                                       </Dropdown.Item>
+                                 })
+                              }
+                           </Dropdown.Menu>
+                        </Dropdown>
+                        {i.generationError && buttonWithError(i.generationError)}
+                     </div>
+                  </ListGroup.Item>
+               </div>
+            })}
+         </ListGroup>
+        
+      </div>
+   </div>
+};
