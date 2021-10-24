@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useState, createRef } from 'react'
+import { useState, createRef, useReducer } from 'react'
 const { ipcRenderer } = window.require("electron");
 import ListGroup from 'react-bootstrap/ListGroup';
 import Dropdown from 'react-bootstrap/Dropdown'
@@ -9,67 +9,28 @@ import { ArtifactElement } from '../../models/ArtifactElement';
 import useGenerateOutputs from '../../hooks/useGenerateOutputs';
 let image = require('/img/planets.png');
 import './SearchFolders.styles.css';
-let repoType: string[] = [
-   "Git",
-   "Mercurial"
-];
+import { RepoList } from '../repo-list/RepoList';
+import { AppState, AddFolder, ClearAll, RemoveFolder } from "../../reducers/foldersSlice";
+import { useSelector, useDispatch } from 'react-redux'
 
 export const SearchFolders: React.FC<{}> = () => {
-   const folderStateStorageName: string = "foldersState";
-   let readFromStorage = localStorage.getItem(folderStateStorageName);
-   let parsedFromStorage = readFromStorage ? JSON.parse(readFromStorage) : new Array<ArtifactElement>();
-   let [folders, setFolders] = useState<ArtifactElement[]>(parsedFromStorage);
+   const artifacts: ArtifactElement[] = useSelector((state: AppState) => state.artifacts);
+
    let monthCalendarRef = createRef<HTMLInputElement>();
    let [outputDir, setOutputDir] = useState('');
-
-   let [generated, isGenerating, handleGeneration] = useGenerateOutputs()
-
+   let [generated, isGenerating, handleGeneration] = useGenerateOutputs();
    
    React.useEffect(() => {
       setOutputDir(localStorage.getItem("outputDirectory") as string);   
    }, []);
 
-   let [selectedItem, setSelectedItem] = useState<string>("")
-
-   const handleSelectFolder = () => {
-      let i = ipcRenderer.sendSync("selected-generation-folder");
-      let newFolders = i.map((element: any) => {
-         return {
-            path: element.folderPath,
-            repositoryType: element.repositoryType
-         }
-      });
-
-      localStorage.setItem(folderStateStorageName, JSON.stringify([...folders, ...newFolders]));
-      setFolders([...folders, ...newFolders]);
-   };
-
-   const onElementClick: any = (e: any, i: string) => {
-      setSelectedItem(i);
-   };
-
-   const handleSelectRemove = (e: any, i: string) => {
-      let foldersTmp = folders.filter(x => x.path !== i);
-      setFolders([...foldersTmp]);
-      localStorage.setItem(folderStateStorageName, JSON.stringify([...foldersTmp]));
-   };
-
-   const onRepositoryTypeChanged = (event: any, path: string, repoType: string) => {
-      let foundObjects = folders.find(x => x.path === path);
-      if (foundObjects) {
-         foundObjects.repositoryType = repoType;
-      } 
-      
-      setFolders([...folders]);
-      localStorage.setItem(folderStateStorageName, JSON.stringify([...folders]));
-   };
-
+   let folders: ArtifactElement[] = [];
    const onGenerate = (event: any) => {
       if (!monthCalendarRef || !monthCalendarRef.current || !monthCalendarRef?.current?.valueAsDate) {
          return;
       }
       
-      handleGeneration(folders, monthCalendarRef.current.valueAsDate, outputDir);
+      handleGeneration(artifacts, monthCalendarRef.current.valueAsDate, outputDir);
    };
 
    const onOutputDirectorySelected: any  = (event: any) => {
@@ -82,26 +43,7 @@ export const SearchFolders: React.FC<{}> = () => {
       localStorage.setItem('outputDirectory', localOutputDir);
    } 
 
-   const popover =(err: any) => {
-      return <Popover id="popover-basic">
-        <Popover.Header as="h3">Error:</Popover.Header>
-        <Popover.Body>
-          {err.toString()}
-        </Popover.Body>
-      </Popover>
-   };
 
-   const buttonWithError = (err: any) => {
-      return <OverlayTrigger trigger="click" placement="right" overlay={popover(err)}>
-         <Button variant="success">❗</Button>
-      </OverlayTrigger>
-   };
-
-   const handleClearAll = () => {
-      setFolders([]);
-   };
-
-   
    return <div className="searchFolderContainer">
       <div className="header">
          <img className={"imageLogo " + (isGenerating && "generating")} src={image} />
@@ -118,43 +60,6 @@ export const SearchFolders: React.FC<{}> = () => {
          </InputGroup>
       </div>
 
-      <div className="elementList">
-         <h1>Items:</h1>
-         <div className="listOperations">
-            <Button disabled={isGenerating} onClick={handleSelectFolder}>Add folder</Button>
-            <Button disabled={isGenerating} onClick={handleClearAll}>Clear all</Button>
-         </div>
-         <ListGroup>
-            {folders.map((i) => {
-               return <div>
-                  <ListGroup.Item variant={generated.some(x => x.path === i.path) ? ( generated.find(x => x.path === i.path && x.generationError) ? "danger" : "success" ) : "light" } key={i.path} onClick={(e:React.MouseEvent<HTMLInputElement>) => {onElementClick(e, i.path)}} 
-                     active={selectedItem === i.path}>
-                     <div className="listGroupItem">
-                        <span className="closeButton" onClick={(e: React.MouseEvent<HTMLElement>) => handleSelectRemove(e, i.path)}>✕</span>
-                        <Dropdown>
-                           <Dropdown.Toggle variant="success" id="dropdown-basic">
-                              {i.repositoryType}
-                           </Dropdown.Toggle>
-                           <Dropdown.Menu>
-                              {
-                                 repoType.map(s => {
-                                    return <Dropdown.Item 
-                                    onClick={(e:  React.MouseEvent<HTMLElement>) => onRepositoryTypeChanged(e, i.path, s)}>
-                                       {s}
-                                       </Dropdown.Item>
-                                 })
-                              }
-                           </Dropdown.Menu>
-                        </Dropdown>
-
-                        <span>{i.path}</span>
-                        {generated.some(x => x.path === i.path && x.generationError) && buttonWithError(generated.find(x => x.path === i.path)?.generationError)}
-                     </div>
-                  </ListGroup.Item>
-               </div>
-            })}
-         </ListGroup>
-        
-      </div>
+      <RepoList artifacts={new Array<ArtifactElement>()} isGenerating={false} generated={generated} />
    </div>
 };
